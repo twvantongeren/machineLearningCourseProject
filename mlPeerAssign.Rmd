@@ -1,0 +1,141 @@
+Determining the execution of fitness excercises from sensor data
+================================================================
+
+# Preparation of the train test and validation dataframe
+
+Since I want to do some cross validation I will split the data in 3 parts.
+I have taken the rule-of-thumb mentioned in the video to split the data.
+This means the data will be split in 60% training, 20% validation and 20% testing.
+I have echoed all R code, so if you would put all the code from this site
+in an R file it should run and produce the results I have.
+
+The "assignmentTest" variable is for the machine-checked prediction results.
+
+## Loading and splitting
+```{r data_read_in_and_split, cache = TRUE}
+set.seed(30042)
+alldata <- read.csv("pml-training.csv")
+assignmentTest <- read.csv("pml-testing.csv")
+
+
+library(caret)
+
+inTrain <- createDataPartition( y = alldata$classe, p = 0.6, list = FALSE)
+training <- alldata[inTrain,]
+testingAndValidation <- alldata[-inTrain,]
+
+inTrain <- createDataPartition( y = testingAndValidation$classe, p = 0.5, list = FALSE)
+testing <- testingAndValidation[inTrain,]
+validation <- testingAndValidation[-inTrain,]
+
+```
+
+## Cleaning redundant information and coercing to numerical data
+I have found the standard deviation and variance of some of the signals from the sensors.
+However this information is ofcourse redundant so I have removed all standard deviation and
+variance data.
+The training dataframe has some variables which have class "factor" so these should be
+converted to numerical variables.
+If there is something else in the colum (text like "DIV/0") it will put an "NA" which is nice
+since we then can find out how many real numerical datapoints we really have.
+
+```{r remove_derivatives_conver_factors, cache = TRUE}
+
+training <-(training) [grep(".*var.*", names(training), perl = T, invert = T)] 
+training <-(training) [grep(".*stddev.*", names(training), perl = T, invert = T)] 
+training$X <- NULL
+
+training$classe = as.numeric(training$classe)
+
+
+factor2Num <- function(factorIn)
+{
+   dataChar = as.character(factorIn)
+   dataNum = suppressWarnings(as.numeric(dataChar))
+}
+
+training = as.data.frame(apply(X = training, MARGIN = 2, FUN = factor2Num ))
+
+```
+
+## Making some plots to explore the data
+I will plot the data to find out what kind of machine learning model would be appropriate.
+First I plot the result of the same sensor which measures in 2 directions, after that
+I plot the results of different sensors.
+The pairs plot compares all different sensors.
+
+```{r plotting, cache = TRUE}
+
+qplot(accel_belt_x, accel_belt_y , data=training, colour = classe)
+
+qplot(accel_belt_x, accel_arm_x , data=training, colour = classe)
+
+trainIndexForPlot = grep('.*_x$', names(training))
+trainPlotSub = training[,trainIndexForPlot]
+trainPlotSub$classe <- training$classe
+pairs(trainPlotSub, col = trainPlotSub$classe)
+```
+
+I would say the pairs plot shows random forest is a good choice.
+As you can see it also suggests the boosting method.
+
+## Cleaning the NA values
+I have manually looked at the variables 
+and I found some variables have a very big amount of 'NA' values.
+Also the fraction of NA's for these are exactly the same, and if I take out these
+columns from the dataframe the remaining columns have no NA's at all.
+
+Note I change the "classe" value to a factor.
+It has been coerced to a number before 
+so now the levels of my classe are not {A,B,C,D,E} but {1,2,3,4,5}.
+
+```{r remove_NA_cols, cache = TRUE}
+
+colName = names(training)
+aa <- logical(length(colName))
+for (colIndex in 1:(length(colName)-1))
+{
+
+   fraction = sum( is.na( training[,colIndex])) / length(training[,colIndex])
+   if(fraction > 0.9)
+   {   
+      aa[colIndex] = T 
+   }   
+   else
+   {   
+      aa[colIndex] = F 
+   }   
+
+}
+
+training = training[,!aa]
+
+training$classe = as.factor(training$classe)
+```
+
+I have tried to use "glm", "boosting" and "rt".
+"gml" Was the least suitable and the "rt" seems to be the best.
+This is done only with the validation variable 
+and because the partition function of caret chooses random number from the "train" dataframe
+to be placed in the "validation" frame  this is the simplest form of _cross validation_.
+
+I _expect my out-of-sample error_ to be exactly the same as the results one
+can find in the confusion matrix of the validation matrix.
+
+```{r training_predicting_validation, cache = TRUE}
+modelFit = train(classe~., data = training, method = "rf")
+
+predictions <- predict(modelFit, newdata=validation)
+
+# This shows the validation result with which I made the model to optimize "accuracy"
+print(confusionMatrix(predictions, as.factor(as.numeric(validation$classe))))
+
+```
+I have here the confusionmatrix  for the _testing_ set, so this is a set I have
+not used in the project to build to model.
+
+```{r predicting_final_test, cache = TRUE}
+finalPredictions <- predict(modelFit, newdata=testing)
+print(confusionMatrix(finalPredictions, as.factor(as.numeric(testing$classe))))
+
+```
